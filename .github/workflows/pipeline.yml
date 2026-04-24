@@ -1,0 +1,176 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+
+# =========================
+# 1. LINT STAGE
+# =========================
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Python lint
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Run flake8
+        run: flake8 api worker
+
+      # Node lint
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend deps
+        run: cd frontend && npm install
+
+      - name: Run eslint
+        run: cd frontend && npx eslint . || true
+
+      # Docker lint
+      - name: Install hadolint
+        run: |
+          wget https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+          chmod +x hadolint-Linux-x86_64
+          sudo mv hadolint-Linux-x86_64 /usr/local/bin/hadolint
+
+      - name: Lint Dockerfiles
+        run: hadolint api/Dockerfile worker/Dockerfile frontend/Dockerfile
+
+# =========================
+# 2. TEST STAGE
+# =========================
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r api/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests
+        run: pytest --cov=api
+
+# =========================
+# 3. BUILD STAGE
+# =========================
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -t api ./api
+
+      - name: Build Worker image
+        run: docker build -t worker ./worker
+
+      - name: Build Frontend image
+        run: docker build -t frontend ./frontend
+
+# =========================
+# 4. SECURITY SCAN (TRIVY)
+# =========================
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Scan API image
+        run: trivy image --severity CRITICAL --exit-code 1 api
+
+      - name: Scan Worker image
+        run: trivy image --severity CRITICAL --exit-code 1 worker
+
+      - name: Scan Frontend image
+        run: trivy image --severity CRITICAL --exit-code 1 frontend
+
+# =========================
+# 5. INTEGRATION TEST
+# =========================
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: sleep 25
+
+      - name: Test API health
+        run: curl -f http://localhost:8000/health
+
+      - name: Test frontend
+        run: curl -f http://localhost:3000
+
+      - name: Tear down
+        if: always()
+        run: docker compose down
+
+# =========================
+# 6. DEPLOY (ROLLING UPDATE)
+# =========================
+  deploy:
+    runs-on: ubuntu-latest
+    needs: integration-test
+
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy services
+        run: |
+          docker compose up -d --build
+
+          echo "Waiting for API health..."
+
+          timeout 60 bash -c '
+          until curl -f http://localhost:8000/health; do
+            sleep 2
+          done'
+
+          echo "Deployment successful"
