@@ -1,11 +1,8 @@
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
-import main
+from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
+from api import main
 
 # mock redis
 main.r = MagicMock()
