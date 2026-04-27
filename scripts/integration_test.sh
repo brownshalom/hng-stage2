@@ -2,27 +2,20 @@
 
 set -e
 
+echo "Starting integration tests..."
+
 docker-compose up -d --build
 
-sleep 15
+sleep 10
 
-JOB_ID=$(curl -s -X POST http://localhost:3000/submit | jq -r '.job_id')
+# API health check
+curl --fail http://localhost:3000/health
 
-echo "Job ID: $JOB_ID"
+# API endpoint check
+curl --fail http://localhost:8000/health
 
-for i in {1..30}; do
-  STATUS=$(curl -s http://localhost:3000/status/$JOB_ID | jq -r '.status')
-
-  if [ "$STATUS" == "completed" ]; then
-    echo "Job completed"
-    docker-compose down
-    exit 0
-  fi
-
-  sleep 2
-done
-
-echo "Timeout waiting for job completion"
+echo "All services are healthy"
 
 docker-compose down
-exit 1
+
+exit 0

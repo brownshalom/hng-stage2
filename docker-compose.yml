@@ -16,6 +16,9 @@ services:
       resources:
         limits:
           cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
           memory: 256M
 
   api:
@@ -30,7 +33,15 @@ services:
     networks:
       - internal
     ports:
-      - "8000:8000"
+      - "${PORT}:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   worker:
     build: ./worker
@@ -42,6 +53,14 @@ services:
         condition: service_healthy
     networks:
       - internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   frontend:
     build: ./frontend
@@ -54,7 +73,15 @@ services:
     networks:
       - internal
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT}:3000"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
 networks:
   internal:
